@@ -116,3 +116,19 @@ def attitude2quat(attitude):
     q = qt.Quaternion(cos(pitch / 2), 0.0, 0.0, sin(pitch / 2))
     r = qt.Quaternion(cos(roll / 2), sin(roll / 2), 0.0, 0.0)
     return (p * q) * r
+
+
+def grad2rad(angle):
+    return angle * math.pi / 180
+
+
+def rad2grad(angle):
+    return angle * 180 / math.pi
+
+
+# Расчет ведется по формуле взятой из Гравиметрия - Грушинский Н.П.
+# Это эмпирическая формула, справедливая для небольших отклонений от поверхности Земли
+# todo - возможно следует найти более качественные модели расчета
+def acceleration_gravity(latitude, altitude):
+    return 9.780318 * (1 + 0.005302 * math.sin(latitude) ** 2
+                       - 0.000006 * math.sin(2 * latitude) ** 2) - 0.000003086 * altitude
