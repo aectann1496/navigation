@@ -26,32 +26,25 @@ def stationary_data(pos, att, t, size):
 
 
 def integrate(data, pos, att, vel, dt):
-    acc = []
+    accum = []
     for i in range(10, data.shape[0], 10):
-        acc.append(_integrate.accumulate(data[i-10:i,:]))
-    acc = np.asarray(acc)
+        accum.append(_integrate.accumulate(data[i-10:i,:]))
+    accum = np.asarray(accum)
 
-    dv = []
-    rvc = []
-    for i in range(4, acc.shape[0], 4):
-        res = _integrate.coning_sculling(acc[i-4:i, :])
-        dv.append(res[0])
-        rvc.append(res[1])
-    dv = np.asarray(dv)
-    rvc = np.asarray(rvc)
+    raw = []
+    for i in range(4, accum.shape[0], 4):
+        raw.append(_integrate.coning_sculling(accum[i-4:i, :]))
+    raw = np.asarray(raw)
 
-    quat = qt.Quaternion(matrix=dcm.from_pry(*att))
     lat, lon, wan, alt = pos
-    b = dcm.from_llw(lat, lon, wan).transpose()
-    v = np.asarray(vel)
-    result = []
-    for i in range(0, dv.shape[0]):
-        b, v, w = _integrate.integration(b, v, dv[i,:], dt, alt)
-        quat = _integrate.orientation(quat, w, rvc[i,:], dt)
-        llw = dcm.to_llw(b)
-        pry = dcm.to_pry(quat.rotation_matrix)
-        rate = (v[1] * mt.cos(llw[2]) + v[0] * mt.sin(llw[2]),
-                -v[1] * mt.sin(llw[2]) + v[0] * mt.cos(llw[2]))
-        result.append((llw, pry, rate))
+    nav = _integrate.Navigation(earth_dcm=dcm.from_llw(lat, lon, wan).transpose(),
+                                nav_dcm=dcm.from_pry(*att),
+                                rate=np.asarray(vel),
+                                time=data[0, -1])
+    res = [nav]
 
-    return result
+    for i in range(0, raw.shape[0]):
+        nav = _integrate.recalc(raw[i, :], nav, alt, raw[i, -1] - nav.time)
+        res.append(nav)
+
+    return res
