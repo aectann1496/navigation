@@ -4,7 +4,6 @@ import math as mt
 from .model import local_rate, earth_rate
 from collections import namedtuple
 
-
 Navigation = namedtuple('Navigation', 'earth_dcm nav_dcm rate time')
 
 
@@ -56,43 +55,41 @@ def coning_sculling(data):
     return res
 
 
-def orientation(quat, v, rvc, dt):
-    df2 = (rvc ** 2).sum()
-    df4 = df2 ** 2
-    r = 0.5 - df2 / 42 - df4 / 3840
-    fast = qt.Quaternion(1 - df2 / 8 + df4 / 384, r * rvc[0], r * rvc[1], r * rvc[2])
-
-    w = (v ** 2).sum() ** 0.5
-    val = w * dt / 2
-    var = -v / w * mt.sin(val)
-    slow = qt.Quaternion(mt.cos(val), var[0], var[1], var[2])
-
-    return slow * (quat * fast)
-
-
-def integration(dcm, v, dv, dt, alt):
-    omega = local_rate(dcm, v, alt)
-    u = earth_rate(dcm)
+def recalc(data, old, alt, dt):
+    # Angular rate
+    omega = local_rate(old.earth_dcm, old.rate, alt)
+    u = earth_rate(old.earth_dcm)
     w = omega + u
 
-    # Puasson evaluation
-    new_dcm = np.zeros((3, 3))
-    new_dcm[0, 1] = dcm[0, 1] - omega[1] * dcm[2, 1] * dt
-    new_dcm[1, 1] = dcm[1, 1] + omega[0] * dcm[2, 1] * dt
-    new_dcm[2, 1] = dcm[2, 1] + (omega[1] * dcm[0, 1] - omega[0] * dcm[1, 1]) * dt
-    new_dcm[0, 2] = dcm[0, 2] - omega[1] * dcm[2, 2] * dt
-    new_dcm[1, 2] = dcm[1, 2] + omega[0] * dcm[2, 2] * dt
-    new_dcm[2, 2] = dcm[2, 2] + (omega[1] * dcm[0, 2] + omega[0] * dcm[1, 2]) * dt
-    new_dcm[2, 0] = dcm[0, 1] * dcm[1, 2] - dcm[1, 1] * dcm[0, 2]
+    # Puasson equation
+    e_dcm = np.zeros((3, 3))
+    e_dcm[0, 1] = old.earth_dcm[0, 1] - omega[1] * old.earth_dcm[2, 1] * dt
+    e_dcm[1, 1] = old.earth_dcm[1, 1] + omega[0] * old.earth_dcm[2, 1] * dt
+    e_dcm[2, 1] = old.earth_dcm[2, 1] + (omega[1] * old.earth_dcm[0, 1] - omega[0] * old.earth_dcm[1, 1]) * dt
+    e_dcm[0, 2] = old.earth_dcm[0, 2] - omega[1] * old.earth_dcm[2, 2] * dt
+    e_dcm[1, 2] = old.earth_dcm[1, 2] + omega[0] * old.earth_dcm[2, 2] * dt
+    e_dcm[2, 2] = old.earth_dcm[2, 2] + (omega[1] * old.earth_dcm[0, 2] + omega[0] * old.earth_dcm[1, 2]) * dt
+    e_dcm[2, 0] = old.earth_dcm[0, 1] * old.earth_dcm[1, 2] - old.earth_dcm[1, 1] * old.earth_dcm[0, 2]
 
-    v = v + dv + np.array([v[1] * 2 * u[2] - v[2] * (omega[1] + 2 * u[1]),
-                           v[0] * 2 * u[2] - v[2] * (omega[0] + 2 * u[0]),
-                           0]) * dt
+    # Rate recalc
+    dv = np.dot(old.nav_dcm, data[0:3])
+    rate = old.rate + dv + np.array([old.rate[1] * 2 * u[2] - old.rate[2] * (omega[1] + 2 * u[1]),
+                                     old.rate[0] * 2 * u[2] - old.rate[2] * (omega[0] + 2 * u[0]),
+                                     0]) * dt
 
-    return new_dcm, v, w
+    # Fast motion
+    df2 = (data[3:6] ** 2).sum()
+    df4 = df2 ** 2
+    r = 0.5 - df2 / 42 - df4 / 3840
+    fast = qt.Quaternion(1 - df2 / 8 + df4 / 384, r * data[3], r * data[4], r * data[5])
 
+    # Slow motion
+    om = (w ** 2).sum() ** 0.5
+    val = om * dt / 2
+    var = -w / om * mt.sin(val)
+    slow = qt.Quaternion(mt.cos(val), var[0], var[1], var[2])
 
-def recalc(data, old, alt, dt):
-    e_dcm, rate, w = integration(old.earth_dcm, old.rate, np.dot(old.nav_dcm, data[0:3]), dt, alt)
-    n_dcm = orientation(qt.Quaternion(matrix=old.nav_dcm), w, data[3:6], dt).rotation_matrix
+    # Orientation recalc
+    n_dcm = (slow * (qt.Quaternion(matrix=old.nav_dcm) * fast)).rotation_matrix
+
     return Navigation(earth_dcm=e_dcm, nav_dcm=n_dcm, rate=rate, time=data[-1])
